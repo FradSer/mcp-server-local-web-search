@@ -4,6 +4,11 @@
   "description": "MCP server for local web search",
   "module": "index.js",
   "type": "module",
+  "scripts": {
+    "build": "bun build.ts",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
   "keywords": [
     "mcp",
     "local",
@@ -16,13 +21,19 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.5.0",
     "@mozilla/readability": "^0.5.0",
-    "p-queue": "^8.1.0"
+    "@types/bun": "latest",
+    "@types/turndown": "^5.0.5",
+    "cac": "^6.7.14",
+    "p-queue": "^8.1.0",
+    "prettier": "^3.4.2",
+    "puppeteer-core": "24.1.1",
+    "rolldown": "^1.0.0-beta.3",
+    "turndown": "^7.2.0",
+    "turndown-plugin-gfm": "^1.0.2",
+    "typescript": "^5.0.0"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "@types/node": "^20.0.0"
-  },
-  "peerDependencies": {
-    "typescript": "^5.0.0"
+    "happy-dom": "^17.0.2",
+    "undici": "^7.3.0"
   }
 }

@@ -1,3 +1,5 @@
+This project use bun for runtime.
+
 - Follow the user's requirements exactly as provided.
 - Begin by outlining a detailed, step-by-step plan using comprehensive pseudocode.
 - Once the plan is confirmed, proceed to write the code.
