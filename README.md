@@ -11,6 +11,7 @@ An MCP server for performing local web searches. This server provides tools to s
 - Return structured results with titles, URLs, and descriptions
 - Support for content truncation and domain filtering
 - Clean content extraction using Readability
+- Headless browser operation for improved performance
 
 ## Installation
 
@@ -40,6 +41,7 @@ This will add the server to your Claude MCP configuration.
      - `limit`: Maximum number of results to return (default: 5)
      - `truncate`: Maximum length of content to return per result (default: 4000)
      - `show`: Show browser window for debugging (default: false)
+     - `proxy`: Proxy server to use for requests (optional)
 
 ## Requirements
 
@@ -55,6 +57,11 @@ This project uses:
 - [Model Context Protocol SDK](https://github.com/modelcontextprotocol/sdk) for server implementation
 - [@egoist/local-web-search](https://github.com/egoist/local-web-search/) for web search (using playwright-core)
 - [Readability](https://github.com/mozilla/readability) for content extraction
+
+## Contributors
+- [egoist](https://github.com/egoist) - Original local web search author
+- [FradSer](https://github.com/FradSer) - Original author
+- [TheSethRose](https://github.com/TheSethRose) - Playwright integration and performance improvements
 
 ## License
 

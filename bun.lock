@@ -5,7 +5,7 @@
       "name": "mcp-server-local-web-search",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.5.0",
-        "@mozilla/readability": "^0.5.0",
+        "@mozilla/readability": "^0.6.0",
         "@types/bun": "latest",
         "@types/turndown": "^5.0.5",
         "cac": "^6.7.14",
@@ -27,7 +27,7 @@
 
     "@modelcontextprotocol/sdk": ["@modelcontextprotocol/sdk@1.5.0", "", { "dependencies": { "content-type": "^1.0.5", "eventsource": "^3.0.2", "raw-body": "^3.0.0", "zod": "^3.23.8", "zod-to-json-schema": "^3.24.1" } }, "sha512-IJ+5iVVs8FCumIHxWqpwgkwOzyhtHVKy45s6Ug7Dv0MfRpaYisH8QQ87rIWeWdOzlk8sfhitZ7HCyQZk7d6b8w=="],
 
-    "@mozilla/readability": ["@mozilla/readability@0.5.0", "", {}, "sha512-Z+CZ3QaosfFaTqvhQsIktyGrjFjSC0Fa4EMph4mqKnWhmyoGICsV/8QK+8HpXut6zV7zwfWwqDmEjtk1Qf6EgQ=="],
+    "@mozilla/readability": ["@mozilla/readability@0.6.0", "", {}, "sha512-juG5VWh4qAivzTAeMzvY9xs9HY5rAcr2E4I7tiSSCokRFi7XIZCAu92ZkSTsIj1OPceCifL3cpfteP3pDT9/QQ=="],
 
     "@types/bun": ["@types/bun@1.2.2", "", { "dependencies": { "bun-types": "1.2.2" } }, "sha512-tr74gdku+AEDN5ergNiBnplr7hpDp3V1h7fqI2GcR/rsUaM39jpSeKH0TFibRvU0KwniRx5POgaYnaXbk0hU+w=="],
 
