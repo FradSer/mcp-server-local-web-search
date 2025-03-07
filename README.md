@@ -36,7 +36,10 @@ This will add the server to your Claude MCP configuration.
    - Performs web search and returns results with title, URL and description
    - Parameters:
      - `query`: Search query to find relevant content (required)
-     - `limit`: Maximum number of results to return (default: 10)
+     - `excludeDomains`: List of domains to exclude from search results (default: [])
+     - `limit`: Maximum number of results to return (default: 5)
+     - `truncate`: Maximum length of content to return per result (default: 4000)
+     - `show`: Show browser window for debugging (default: false)
 
 ## Requirements
 
@@ -50,7 +53,7 @@ This project uses:
 - [Bun](https://bun.sh) as the JavaScript runtime
 - [TypeScript](https://www.typescriptlang.org/) for type safety
 - [Model Context Protocol SDK](https://github.com/modelcontextprotocol/sdk) for server implementation
-- [@egoist/local-web-search](https://github.com/egoist/local-web-search/) for web search
+- [@egoist/local-web-search](https://github.com/egoist/local-web-search/) for web search (using playwright-core)
 - [Readability](https://github.com/mozilla/readability) for content extraction
 
 ## License

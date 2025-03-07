@@ -20,6 +20,8 @@ interface SearchParams {
   excludeDomains?: string[];
   limit?: number;
   truncate?: number;
+  show?: boolean;
+  proxy?: string;
 }
 
 /**
@@ -54,36 +56,33 @@ function getSearchUrl(options: SearchParams) {
  * Execute web search using browser
  */
 async function executeWebSearch(params: SearchParams): Promise<SearchResult[]> {
-  const browser = await launchBrowser({ type: "fake" });
-  const visitedUrls = new Set<string>();
+  const browser = await launchBrowser({
+    show: params.show,
+    proxy: params.proxy,
+  });
 
   try {
     const url = getSearchUrl(params);
-    const links = await browser.evaluateOnPage(url, getSearchPageLinks, []);
+    const links = await browser.withPage(async (page) => {
+      await page.goto(url, {
+        waitUntil: "domcontentloaded",
+      });
+      return await page.evaluate(getSearchPageLinks);
+    });
 
     if (!links || links.length === 0) {
       return [];
     }
 
-    const validLinks = links.filter((link) => {
-      if (visitedUrls.has(link.url)) return false;
-      visitedUrls.add(link.url);
-      return true;
-    });
+    // Limit the number of results
+    const limitedLinks = links.slice(0, params.limit || 10);
 
-    const readabilityScript = await getReadabilityScript();
+    // Process each link to extract content
     const results = await Promise.all(
-      validLinks.map((item) => visitLink(browser, item.url, readabilityScript))
+      limitedLinks.map((item) => visitLink(browser, item.url, params.truncate))
     );
 
-    return results
-      .filter((result): result is SearchResult => result !== null)
-      .map((result) => ({
-        ...result,
-        content: params.truncate
-          ? result.content?.slice(0, params.truncate)
-          : result.content,
-      }));
+    return results.filter((result): result is SearchResult => result !== null);
   } finally {
     await browser.close();
   }
@@ -95,38 +94,54 @@ async function executeWebSearch(params: SearchParams): Promise<SearchResult[]> {
 async function visitLink(
   browser: BrowserMethods,
   url: string,
-  readabilityScript: string
+  truncate?: number
 ): Promise<SearchResult | null> {
-  const result = await browser.evaluateOnPage(
-    url,
-    (window, readabilityScript) => {
-      const Readability = new Function(
-        "module",
-        `${readabilityScript}\nreturn module.exports`
-      )({});
+  try {
+    const result = await browser.withPage(async (page) => {
+      await page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+      });
 
-      const document = window.document;
-      const selectorsToRemove = [
-        "script,noscript,style,link,svg,img,video,iframe,canvas",
-        ".reflist", // wikipedia refs
-      ];
-      document
-        .querySelectorAll(selectorsToRemove.join(","))
-        .forEach((el) => el.remove());
+      // Use Readability to extract the main content
+      const readabilityScript = await getReadabilityScript();
+      return await page.evaluate(
+        ([readabilityScript, truncateLength]) => {
+          const Readability = new Function(
+            "module",
+            `${readabilityScript}\nreturn module.exports`
+          )({});
 
-      const article = new Readability(document).parse();
-      const content = article?.content || "";
-      const title = document.title;
+          const document = window.document;
+          const selectorsToRemove = [
+            "script,noscript,style,link,svg,img,video,iframe,canvas",
+            ".reflist", // wikipedia refs
+          ];
+          document
+            .querySelectorAll(selectorsToRemove.join(","))
+            .forEach((el) => el.remove());
 
-      return { content, title: article?.title || title };
-    },
-    [readabilityScript]
-  );
+          const article = new Readability(document).parse();
+          const content = article?.content || "";
+          const title = document.title;
 
-  if (!result) return null;
+          return {
+            content: truncateLength ? content.slice(0, truncateLength) : content,
+            title: article?.title || title,
+          };
+        },
+        [readabilityScript, truncate]
+      );
+    });
 
-  const content = toMarkdown(result.content);
-  return { ...result, url, content };
+    if (!result) return null;
+
+    const content = toMarkdown(result.content);
+    return { ...result, url, content };
+  } catch (error) {
+    console.error(`Error visiting ${url}:`, error);
+    return null;
+  }
 }
 
 // Define the local web search tool
@@ -150,12 +165,23 @@ const LOCAL_WEB_SEARCH_TOOL: Tool = {
       },
       limit: {
         type: "number",
-        description: "Maximum number of results to return (default: 20)",
-        default: 20
+        description: "Maximum number of results to return (default: 5)",
+        default: 5
       },
       truncate: {
         type: "number",
-        description: "Maximum length of content to return per result"
+        description: "Maximum length of content to return per result (default: 4000)",
+        default: 4000
+      },
+      show: {
+        type: "boolean",
+        description: "Show browser window for debugging (default: false)",
+        default: false
+      },
+      proxy: {
+        type: "string",
+        description: "Proxy server to use for requests",
+        default: ""
       }
     },
     required: ["query"]
@@ -172,7 +198,7 @@ const server = new Server(
     capabilities: {
       tools: {},
     },
-  } 
+  }
 );
 
 function isLocalWebSearchArgs(args: unknown): args is SearchParams {

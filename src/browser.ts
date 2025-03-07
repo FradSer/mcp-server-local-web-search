@@ -1,161 +1,139 @@
-import { launch, Page } from "puppeteer-core"
-import { findBrowser } from "./find-browser"
-import { domFetchAndEvaluate } from "./dom"
+import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+import { chromium, type Page } from "playwright-core";
+import { findBrowser } from "./find-browser";
+import { domFetchAndEvaluate } from "./dom";
 
-type RealBrowserOptions = {
-  type: "real"
-  show?: boolean
-  browser?: string
-  proxy?: string
-}
-
-type FakeBrowserOptions = {
-  type: "fake"
-  proxy?: string
-}
-
-type Options = RealBrowserOptions | FakeBrowserOptions
+type BrowserOptions = {
+  show?: boolean;
+  browser?: string;
+  proxy?: string;
+  executablePath?: string;
+  profilePath?: string;
+};
 
 export type BrowserMethods = {
-  close: () => Promise<void>
-
+  close: () => Promise<void>;
+  withPage: <T>(fn: (page: Page) => T | Promise<T>) => Promise<T>;
   evaluateOnPage: <T extends any[], R>(
     url: string,
     fn: (window: Window, ...args: T) => R,
     fnArgs: T,
-  ) => Promise<R | null>
-}
+  ) => Promise<R | null>;
+};
 
-export const launchBrowser = async (options: Options) => {
-  if (options.type === "real") {
-    return launchRealBrowser(options)
+export const launchBrowser = async (
+  options: BrowserOptions
+): Promise<BrowserMethods> => {
+  const userDataDir = options.profilePath
+    ? path.dirname(options.profilePath)
+    : path.join(os.tmpdir(), "local-web-search-user-dir-temp");
+
+  // Create user data directory if it doesn't exist
+  if (!fs.existsSync(userDataDir)) {
+    const defaultPreferences = {
+      plugins: {
+        always_open_pdf_externally: true,
+      },
+    };
+
+    const defaultProfileDir = path.join(userDataDir, "Default");
+    fs.mkdirSync(defaultProfileDir, { recursive: true });
+
+    fs.writeFileSync(
+      path.join(defaultProfileDir, "Preferences"),
+      JSON.stringify(defaultPreferences)
+    );
   }
 
-  return launchFakeBrowser(options)
-}
-
-const launchRealBrowser = async (
-  options: RealBrowserOptions,
-): Promise<BrowserMethods> => {
-  const browser = findBrowser(options.browser)
-
-  const context = await launch({
-    executablePath: browser.executable,
+  // Launch browser with persistent context
+  const context = await chromium.launchPersistentContext(userDataDir, {
+    executablePath: options.executablePath || findBrowser(options.browser).executable,
     headless: !options.show,
     args: [
-      // "--enable-webgl",
-      // "--use-gl=swiftshader",
-      // "--enable-accelerated-2d-canvas",
       "--disable-blink-features=AutomationControlled",
-      // "--disable-web-security",
-      options.proxy ? `--proxy-server=${options.proxy}` : null,
-    ].filter((v) => v !== null),
-    ignoreDefaultArgs: ["--enable-automation"],
-    defaultViewport: {
-      width: 1280,
-      height: 720,
-    },
-    downloadBehavior: {
-      policy: "deny",
-    },
-  })
+      "--disable-features=IsolateOrigins,site-per-process",
+      "--disable-site-isolation-trials",
+    ],
+    proxy: options.proxy ? { server: options.proxy } : undefined,
+  });
 
   return {
     close: async () => {
-      context.close()
+      await context.close();
     },
-
-    evaluateOnPage: async (url, fn, fnArgs) => {
-      const page = await context.newPage()
-
+    withPage: async <T>(fn: (page: Page) => T | Promise<T>): Promise<T> => {
+      const page = await context.newPage();
       try {
-        await interceptRequest(page)
-        await page.goto(url, {
-          waitUntil: "networkidle2",
-        })
-        const win = await page.evaluateHandle(() => window)
-        const result = await page.evaluate(fn, win, ...fnArgs)
-        await win.dispose()
-        await page.close()
-        return result
-      } catch (error) {
-        await page.close()
-        throw error
+        await applyStealthTechniques(page);
+        return await fn(page);
+      } finally {
+        await page.close();
       }
     },
-  }
-}
+    evaluateOnPage: async <T extends any[], R>(
+      url: string,
+      fn: (window: Window, ...args: T) => R,
+      fnArgs: T,
+    ): Promise<R | null> => {
+      const page = await context.newPage();
+      try {
+        await applyStealthTechniques(page);
+        await page.goto(url, {
+          waitUntil: "domcontentloaded",
+          timeout: 30000,
+        });
 
-const launchFakeBrowser = async (
-  options: FakeBrowserOptions,
-): Promise<BrowserMethods> => {
-  return {
-    close: async () => {},
+        // Convert the function to a string to pass to evaluate
+        const fnString = fn.toString();
+        const argsString = JSON.stringify(fnArgs);
 
-    evaluateOnPage: async (url, fn, fnArgs) => {
-      const result = await domFetchAndEvaluate(
-        url,
-        (window, ...args) => fn(window as any, ...args),
-        fnArgs,
-        { proxy: options.proxy },
-      )
+        // Use evaluate to run the function in the browser context
+        const result = await page.evaluate(`
+          (function() {
+            const fn = ${fnString};
+            const args = ${argsString};
+            return fn(window, ...args);
+          })()
+        `);
 
-      return result
-    },
-  }
-}
-
-async function interceptRequest(page: Page) {
-  await applyStealthScripts(page)
-  await page.setRequestInterception(true)
-
-  page.on("request", (request) => {
-    const resourceType = request.resourceType()
-
-    if (resourceType !== "document") {
-      return request.abort()
+        return result;
+      } catch (error) {
+        console.error(`Error evaluating on page ${url}:`, error);
+        return null;
+      } finally {
+        await page.close();
+      }
     }
+  };
+};
 
-    if (request.isNavigationRequest()) {
-      return request.continue()
-    }
-
-    return request.abort()
-  })
-}
-
-async function applyStealthScripts(page: Page) {
-  await page.setBypassCSP(true)
-  await page.setUserAgent(
-    `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/237.84.2.178 Safari/537.36`,
-  )
-  await page.evaluate(() => {
-    // Override the navigator.webdriver property
-    Object.defineProperty(navigator, "webdriver", {
-      get: () => undefined,
-    })
-
-    // Mock languages and plugins to mimic a real browser
-    Object.defineProperty(navigator, "languages", {
-      get: () => ["en-US", "en"],
-    })
-
-    Object.defineProperty(navigator, "plugins", {
-      get: () => [1, 2, 3, 4, 5],
-    })
-
-    // Redefine the headless property
-    Object.defineProperty(navigator, "headless", {
+async function applyStealthTechniques(page: Page) {
+  // Override navigator.webdriver
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', {
       get: () => false,
-    })
+    });
 
-    // Override the permissions API
-    const originalQuery = window.navigator.permissions.query
-    window.navigator.permissions.query = (parameters) =>
-      parameters.name === "notifications"
-        ? Promise.resolve({
-            state: Notification.permission,
-          } as PermissionStatus)
-        : originalQuery(parameters)
-  })
+    // Add other stealth techniques
+    const originalQuery = window.navigator.permissions.query;
+    // @ts-ignore
+    window.navigator.permissions.query = (parameters) => (
+      parameters.name === 'notifications' ?
+        Promise.resolve({ state: Notification.permission }) :
+        originalQuery(parameters)
+    );
+
+    // Overwrite the `plugins` property to use a custom getter.
+    Object.defineProperty(navigator, 'plugins', {
+      // This just needs to have `length > 0` for the current purpose.
+      get: () => [1, 2, 3, 4, 5],
+    });
+
+    // Overwrite the `languages` property to use a custom getter.
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['en-US', 'en'],
+    });
+  });
 }
