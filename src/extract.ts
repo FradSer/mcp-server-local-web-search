@@ -3,7 +3,7 @@
 
 import type { SearchResult } from "./cli"
 
-export function getSearchPageLinks(window: Window) {
+export function getSearchPageLinks() {
   const links: SearchResult[] = []
   const document = window.document
 
@@ -17,17 +17,18 @@ export function getSearchPageLinks(window: Window) {
   }
 
   try {
-    // DuckDuckGo HTML search results are in .links_main elements
-    const elements = document.querySelectorAll(".links_main")
+    // Google search results are in div elements with class 'g'
+    const elements = document.querySelectorAll(".g")
     elements.forEach((element) => {
-      const titleEl = element.querySelector(".links_main a")
-      const url = titleEl?.getAttribute("href")
+      const titleEl = element.querySelector("h3")
+      const urlEl = element.querySelector("a")
+      const url = urlEl?.getAttribute("href")
 
       if (!url || !isValidUrl(url)) return
 
       const item: SearchResult = {
-        title: titleEl?.textContent?.trim() || "",
-        url: url.startsWith("/") ? `https://duckduckgo.com${url}` : url,
+        title: titleEl?.textContent || "",
+        url,
       }
 
       if (!item.title || !item.url) return

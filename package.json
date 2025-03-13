@@ -20,14 +20,13 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.5.0",
-    "@mozilla/readability": "^0.5.0",
+    "@mozilla/readability": "^0.6.0",
     "@types/bun": "latest",
     "@types/turndown": "^5.0.5",
     "cac": "^6.7.14",
     "p-queue": "^8.1.0",
+    "playwright-core": "^1.42.1",
     "prettier": "^3.4.2",
-    "puppeteer-core": "24.1.1",
-    "rolldown": "^1.0.0-beta.3",
     "turndown": "^7.2.0",
     "turndown-plugin-gfm": "^1.0.2",
     "typescript": "^5.0.0"
