@@ -1,3 +1,0 @@
-[submodule "local-web-search"]
-	path = local-web-search
-	url = git@github.com:egoist/local-web-search.git

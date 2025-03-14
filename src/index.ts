@@ -7,10 +7,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { launchBrowser, type BrowserMethods } from "./browser.js";
-import { getSearchPageLinks } from "./extract.js";
-import { getReadabilityScript } from "./macro.js";
-import { toMarkdown } from "./to-markdown.js";
+import { chromium } from 'playwright-core';
 
 /**
  * Interface for search parameters
@@ -27,27 +24,29 @@ interface SearchParams {
 /**
  * Interface for search results
  */
-interface SearchResult {
+type SearchResult = {
   title: string;
   url: string;
   content?: string;
-}
+};
 
 /**
  * Get Google search URL with parameters
  */
 function getSearchUrl(options: SearchParams) {
   const searchParams = new URLSearchParams({
-    q: `${
-      options.excludeDomains && options.excludeDomains.length > 0
-        ? `${options.excludeDomains.map((domain) => `-site:${domain}`).join(" ")} `
-        : ""
-    }${options.query}`,
+    q: options.query,
     num: `${options.limit || 10}`,
+    hl: 'zh-CN',
+    gl: 'cn',
+    start: '0',
   });
 
-  // web tab
-  searchParams.set("udm", "14");
+  // Exclude domains if specified
+  if (options.excludeDomains && options.excludeDomains.length > 0) {
+    const excludeSites = options.excludeDomains.map(domain => `-site:${domain}`).join(' ');
+    searchParams.set('q', `${excludeSites} ${options.query}`);
+  }
 
   return `https://www.google.com/search?${searchParams.toString()}`;
 }
@@ -56,91 +55,167 @@ function getSearchUrl(options: SearchParams) {
  * Execute web search using browser
  */
 async function executeWebSearch(params: SearchParams): Promise<SearchResult[]> {
-  const browser = await launchBrowser({
-    show: params.show,
-    proxy: params.proxy,
-  });
-
+  console.error('Starting search with params:', params);
+  
+  const browserType = chromium;
+  let browser;
   try {
+    browser = await browserType.launch({
+      headless: !params.show,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      proxy: params.proxy ? {
+        server: params.proxy
+      } : undefined
+    });
+    console.error('Browser launched successfully');
+
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+      viewport: { width: 1920, height: 1080 },
+      locale: 'zh-CN',
+      geolocation: { longitude: 114.3162, latitude: 30.5815 }, // Wuhan coordinates
+      permissions: ['geolocation']
+    });
+    console.error('Browser context created');
+    
+    const page = await context.newPage();
+    console.error('New page created');
+
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
+    });
+    
     const url = getSearchUrl(params);
-    const links = await browser.withPage(async (page) => {
-      await page.goto(url, {
-        waitUntil: "domcontentloaded",
+    console.error('Navigating to URL:', url);
+    
+    const response = await page.goto(url, { 
+      waitUntil: 'networkidle',
+      timeout: 60000 
+    });
+    
+    if (!response) {
+      throw new Error('Failed to get response from page');
+    }
+    
+    console.error('Page loaded with status:', response.status());
+    
+    // Wait for search results to load and handle potential Google consent form
+    await page.waitForLoadState('domcontentloaded');
+    console.error('Page DOM content loaded');
+    
+    // Handle consent form if it appears
+    const consentButton = await page.$('button[aria-label="同意使用 Cookie"]');
+    if (consentButton) {
+      console.error('Found consent button, clicking...');
+      await consentButton.click();
+      await page.waitForLoadState('networkidle');
+    }
+    
+    // Wait for search results with increased timeout
+    console.error('Waiting for search results...');
+    const resultsPresent = await page.waitForSelector('.g', { timeout: 60000 })
+      .then(() => true)
+      .catch(() => {
+        console.error('Failed to find .g selector');
+        return false;
       });
-      return await page.evaluate(getSearchPageLinks);
+      
+    if (!resultsPresent) {
+      console.error('No search results found after waiting');
+      // Try alternative selectors
+      const altSelectors = ['div[data-hveid]', 'div.yuRUbf', '#search'];
+      for (const selector of altSelectors) {
+        console.error(`Trying alternative selector: ${selector}`);
+        const found = await page.$(selector);
+        if (found) {
+          console.error(`Found results with selector: ${selector}`);
+          break;
+        }
+      }
+      
+      // Try to get page content for debugging
+      const pageContent = await page.content();
+      console.error('Page content:', pageContent.slice(0, 1000));
+      
+      // Take a screenshot for debugging
+      if (params.show) {
+        await page.screenshot({ path: 'debug-screenshot.png' });
+        console.error('Screenshot saved as debug-screenshot.png');
+      }
+      
+      return [];
+    }
+    
+    const links = await page.evaluate(() => {
+      const results: Array<{title: string, url: string}> = [];
+      document.querySelectorAll('.g').forEach((el) => {
+        const titleEl = el.querySelector('h3');
+        const linkEl = el.querySelector('a');
+        const url = linkEl?.getAttribute('href');
+        
+        if (titleEl && url && url.startsWith('http')) {
+          results.push({
+            title: titleEl.textContent || '',
+            url: url
+          });
+        }
+      });
+      return results;
     });
 
+    console.error('Found links:', links.length);
     if (!links || links.length === 0) {
       return [];
     }
 
     // Limit the number of results
     const limitedLinks = links.slice(0, params.limit || 10);
+    console.error('Processing', limitedLinks.length, 'links');
 
     // Process each link to extract content
     const results = await Promise.all(
-      limitedLinks.map((item) => visitLink(browser, item.url, params.truncate))
+      limitedLinks.map(async (item, index) => {
+        try {
+          console.error(`Processing link ${index + 1}/${limitedLinks.length}: ${item.url}`);
+          const page = await context.newPage();
+          const response = await page.goto(item.url, { 
+            timeout: 30000,
+            waitUntil: 'networkidle'
+          });
+          
+          if (!response) {
+            throw new Error('Failed to get response');
+          }
+          
+          console.error(`Link ${index + 1} loaded with status:`, response.status());
+          const content = await page.evaluate(() => document.body.innerText);
+          await page.close();
+          return {
+            ...item,
+            content: params.truncate ? content.slice(0, params.truncate) : content
+          } as SearchResult;
+        } catch (error) {
+          console.error(`Error visiting ${item.url}:`, error);
+          return null;
+        }
+      })
     );
 
-    return results.filter((result): result is SearchResult => result !== null);
-  } finally {
+    const validResults = results.filter((result): result is SearchResult => result !== null);
+    console.error('Successfully processed', validResults.length, 'results');
+    
+    // Close browser after all operations are complete
     await browser.close();
-  }
-}
-
-/**
- * Visit a link and extract content
- */
-async function visitLink(
-  browser: BrowserMethods,
-  url: string,
-  truncate?: number
-): Promise<SearchResult | null> {
-  try {
-    const result = await browser.withPage(async (page) => {
-      await page.goto(url, {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
-      });
-
-      // Use Readability to extract the main content
-      const readabilityScript = await getReadabilityScript();
-      return await page.evaluate(
-        ([readabilityScript, truncateLength]) => {
-          const Readability = new Function(
-            "module",
-            `${readabilityScript}\nreturn module.exports`
-          )({});
-
-          const document = window.document;
-          const selectorsToRemove = [
-            "script,noscript,style,link,svg,img,video,iframe,canvas",
-            ".reflist", // wikipedia refs
-          ];
-          document
-            .querySelectorAll(selectorsToRemove.join(","))
-            .forEach((el) => el.remove());
-
-          const article = new Readability(document).parse();
-          const content = article?.content || "";
-          const title = document.title;
-
-          return {
-            content: truncateLength ? content.slice(0, truncateLength) : content,
-            title: article?.title || title,
-          };
-        },
-        [readabilityScript, truncate]
-      );
-    });
-
-    if (!result) return null;
-
-    const content = toMarkdown(result.content);
-    return { ...result, url, content };
+    console.error('Browser closed');
+    
+    return validResults;
   } catch (error) {
-    console.error(`Error visiting ${url}:`, error);
-    return null;
+    console.error('Search error:', error);
+    if (browser) {
+      await browser.close();
+      console.error('Browser closed after error');
+    }
+    return [];
   }
 }
 
@@ -165,8 +240,8 @@ const LOCAL_WEB_SEARCH_TOOL: Tool = {
       },
       limit: {
         type: "number",
-        description: "Maximum number of results to return (default: 5)",
-        default: 5
+        description: "Maximum number of results to return (default: 100)",
+        default: 100
       },
       truncate: {
         type: "number",
